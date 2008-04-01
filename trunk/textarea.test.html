@@ -1,0 +1,203 @@
+<html>
+<head>
+<title>selection test</title>
+<script>
+
+	var xTextarea = function() {
+		
+		function Position(row, col, char, offset) {
+			this.row=row;
+			this.col=col;
+			this.char=char;
+			this.offset=offset;
+		}
+	
+		var tabSize=8;
+	
+		function setCursorPosition(input, position) {
+			var offset = 0;
+			if (position.offset) {
+				offset = position.offset;
+			} else if (position.row) {
+				if (document.all) {
+					var lines = input.value.split('\r\n');
+				} else {
+					var lines = input.value.split('\n');
+				}
+				var offset = lines.slice(0,position.row-1).join('\n').length;
+				if (position.char) {
+					offset += position.char;
+				} else if (position.col) {
+					var line = lines[position.row-1];
+					offset += columnToCharPos(position.col, line);
+				} else {
+					throw('Need more position elements either (row,col), (row,char) or (offset)');
+					return false;
+				}
+			} else {
+				throw('Need more position elements either (row,col), (row,char) or (offset)');
+				return false;
+			}
+			var max = input.value.length;
+			if (max<offset) {
+				offset=max;
+			}
+			if (input.selectionStart) {
+//				input.selectionStart = offset;
+//				input.selectionEnd = offset;
+				input.setSelectionRange(offset,offset);
+			} else if (document.selection) {
+				var cursor = document.selection.createRange();
+				cursor.moveToElementText(input);
+				cursor.collapse();
+				cursor.moveStart('character',offset);
+				cursor.select();
+			}
+			return offset;
+		}
+		
+		function getCursorPosition(input) {
+			if (input.selectionStart || input.selectionStart===0) { // FIXME: where is the cursor in a selection, head or arse end?
+		
+				var pre = input.value.slice(0,input.selectionStart);
+				var offset = pre.length;
+				var lines = pre.split('\n');
+				var row = lines.length;
+				var char = lines[lines.length-1].length+1;
+				var col = charPosToColumn(char, lines[lines.length-1]);
+
+			} else if (document.selection) { //IE
+
+				var cursor = document.selection.createRange();
+				var fullRange = cursor.duplicate();
+				fullRange.moveToElementText(input);
+				cursor.setEndPoint('StartToStart', fullRange);
+				var offset = cursor.text.length;
+				
+				if (!offset) { // algorithm fails when cursor is on the first position available, so hardcode it here
+					var row = 1; 
+					var col = 1;
+					var char = 1;
+				} else {
+					var lines = String(cursor.text).split('\n');
+					var row = lines.length;
+					
+					// get trailing empty lines, since Internet Explorer automagically trims the selection, we need to do some magic here
+					var oldLength=String(cursor.text).length;
+					var newLength=oldLength;
+					var trailingLines = 0;
+					while((cursor.compareEndPoints('EndToStart', fullRange)>0) && (newLength==oldLength)) {
+						trailingLines += cursor.moveEnd('character',-1);
+						newLength=String(cursor.text).length;
+						// for every character we move the cursor without changing the length of the selection, IE has trimmed of an empty line, so add it here
+					}
+					trailingLines = Math.abs(trailingLines)-1;
+					row += trailingLines;
+					if (row>lines.length) {
+						var char=1;
+						var col=1;
+					} else {
+						var char = lines[lines.length-1].length+1;
+						var col = charPosToColumn(char, lines[lines.length-1]);
+					}
+				}
+			}
+			return new Position(row, col, char, offset); 			
+		}
+		
+		function charPosToColumn(charPos, line) {
+			var colCounter	= 1;
+			var charCounter	= 0;
+			var tempLine	= line;
+			var nextChar;
+			var realTabSize;
+			while (charCounter < (charPos-1)) {
+				// walk through the string a character at a time
+				// FIXME: this can be sped up
+				nextChar = tempLine.charAt(charCounter);
+				charCounter++;
+				if (nextChar == '\t') {
+					realTabSize = tabSize-((colCounter-1)%tabSize);
+					colCounter += realTabSize;
+				} else {
+					colCounter++;
+				}
+				if (!nextChar) {
+					break;
+				}
+			}
+			return colCounter;		
+		}
+		
+		function columnToCharPos(column, line) {
+			var colCounter	= 0;
+			var charCounter	= 0;
+			var tempLine	= new String(line);
+			var nextChar;
+			var realTabSize;
+			do {
+				nextChar = tempLine.charAt(charCounter);
+				// walk through the string a character at a time
+				// FIXME: this can be sped up
+				charCounter++;
+				if (nextChar == '\t') {
+					realTabSize = tabSize-(colCounter%tabSize);
+					colCounter += realTabSize;
+				} else {
+					colCounter++;
+				}
+			} while (nextChar && colCounter<column);
+			return charCounter-1;
+		}
+
+		return {
+			getCursorPosition:function(input) {
+				return getCursorPosition(input);
+			},
+			setCursorPosition:function(input, position) {
+				return setCursorPosition(input, position);
+			},
+			Position:function(row, col, char, offset) {
+				this.row=row; this.col=col; this.char=char; this.offset=offset;
+			}
+		}
+	}();
+	
+	function showInfo(evt) {
+		var evt = evt ? evt : window.event;
+		var input = evt.target ? evt.target : evt.srcElement;
+		var pos = xTextarea.getCursorPosition(input);
+		document.getElementById('row').value=pos.row;
+		document.getElementById('col').value=pos.col;
+		document.getElementById('char').value=pos.char;
+		document.getElementById('offset').value=pos.offset;		
+	}
+
+	function test() {
+		var input = document.getElementById('test');
+		input.focus();
+		xTextarea.setCursorPosition(input, new xTextarea.Position(2, 10));
+		var pos = xTextarea.getCursorPosition(input);
+		document.getElementById('row').value=pos.row;
+		document.getElementById('col').value=pos.col;
+		document.getElementById('char').value=pos.char;
+		document.getElementById('offset').value=pos.offset;		
+	}
+	
+	window.onload=function() {	
+		document.getElementById('test').onkeyup=showInfo;
+		document.getElementById('test').onclick=showInfo;
+	}
+</script>
+</head>
+<body>
+<textarea id='test' style="width: 70%; height: 70%"></textarea>
+<div>
+row: <input type="text" style="width: 30px;" id="row">
+col: <input type="text" style="width: 30px;" id="col">
+char: <input type="text" style="width: 30px;" id="char">
+off: <input type="text" style="width: 30px;" id="offset">
+
+<button onClick="test();">test</button>
+</body>
+</html>
