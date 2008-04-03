@@ -2,51 +2,24 @@
 <head>
 <title>selection test</title>
 <script>
-
+	/*
+		xTextarea.Position
+			offset	character offset from the start of the textarea, in IE each newline is counted as two characters (\r\n)
+			char	character offset from the start of the line the cursor is on, tabs are counted as one character
+			col	column position of the cursor, tabs are calculated to their tab stops
+			row	row position of the cursor
+	*/
 	var xTextarea = function() {
 		
-		function Position(row, col, char, offset) {
-			this.row=row;
-			this.col=col;
-			this.char=char;
-			this.offset=offset;
-		}
-	
 		var tabSize=8;
 	
 		function setCursorPosition(input, position) {
-			var offset = 0;
-			if (position.offset) {
-				offset = position.offset;
-			} else if (position.row) {
-				if (document.all) {
-					var lines = input.value.split('\r\n');
-				} else {
-					var lines = input.value.split('\n');
-				}
-				var offset = lines.slice(0,position.row-1).join('\n').length;
-				if (position.char) {
-					offset += position.char;
-				} else if (position.col) {
-					var line = lines[position.row-1];
-					offset += columnToCharPos(position.col, line);
-				} else {
-					throw('Need more position elements either (row,col), (row,char) or (offset)');
-					return false;
-				}
-			} else {
-				throw('Need more position elements either (row,col), (row,char) or (offset)');
-				return false;
-			}
-			var max = input.value.length;
-			if (max<offset) {
-				offset=max;
-			}
-			if (input.selectionStart) {
-//				input.selectionStart = offset;
-//				input.selectionEnd = offset;
-				input.setSelectionRange(offset,offset);
+			var fullPosition = getPosition(input, position);
+			if (input.setSelectionRange) {
+				input.setSelectionRange(fullPosition.offset,fullPosition.offset);
 			} else if (document.selection) {
+				// for each newline in the text upto the cursor position, the offset is off by one, since IE counts \r\n as one position with moveStart
+				var offset = fullPosition.offset - (fullPosition.row-1);
 				var cursor = document.selection.createRange();
 				cursor.moveToElementText(input);
 				cursor.collapse();
@@ -55,16 +28,60 @@
 			}
 			return offset;
 		}
+
+		function normalizeNL(value) {
+			if (document.all) {
+				return String(value).replace('\r\n','\n');
+			} else {
+				return String(value);
+			}
+		}
+		
+		function getPosition(input, position) {
+			var result	= new xTextarea.Position(position.row, position.col, position.char, position.offset);
+			var text	= String(input.value);
+			// check what we know
+			if (!position.offset && position.offset!==0) { // 0 is a valid offset
+				if (position.row) { // rows count from 1, so 0 is not a valid row
+					var lines	= text.split('\n');
+					var pre 	= lines.slice(0,position.row-1).join('\n');
+					if (position.row>1) { // add one newline for the last line, since join skips the last line, but only if there is at least one line in pre 
+						pre+='\n';
+					}
+					if (position.row>lines.length) {
+						result.row=lines.length;
+					}
+					if (position.char || position.char===0) { // 0 is a valid char position, check it explicitly or it fails
+						pre 		+= lines[result.row-1].substr(0, position.char)
+						result.col 	= charPosToColumn(position.char, lines[result.row-1]);
+					} else if (position.col) { // columns count from 1 on, no need to check for 0
+						result.char 	= columnToCharPos(position.col, lines[result.row-1]);
+						pre 		+= lines[result.row-1].substr(0, result.char)
+					} else {
+						throw('Need more position elements either (row,col), (row,char) or (offset)');
+					}
+					result.offset = pre.length;
+				} else {
+					throw('Need more position elements either (row,col), (row,char) or (offset)');
+				}
+			} else {
+				// offset is known, calc everything else
+				var pre = text.slice(0,position.offset);
+				var lines = pre.split('\n');
+				result.row = lines.length;
+				result.char = lines[lines.length-1].length+1;
+				result.col = charPosToColumn(result.char, lines[lines.length-1]);
+			}			
+			return result;
+		}
 		
 		function getCursorPosition(input) {
-			if (input.selectionStart || input.selectionStart===0) { // FIXME: where is the cursor in a selection, head or arse end?
-		
-				var pre = input.value.slice(0,input.selectionStart);
-				var offset = pre.length;
-				var lines = pre.split('\n');
-				var row = lines.length;
-				var char = lines[lines.length-1].length+1;
-				var col = charPosToColumn(char, lines[lines.length-1]);
+			// FIXME: where is the cursor in a selection, head or arse end?
+			// the only way is to keep track of previous values of the cursor position, the one that stays the same is not the cursor
+			var result = false;
+			if (input.setSelectionRange) { 
+
+				result = getPosition(input, new xTextarea.Position(0,0,0,input.selectionStart));
 
 			} else if (document.selection) { //IE
 
@@ -73,36 +90,27 @@
 				fullRange.moveToElementText(input);
 				cursor.setEndPoint('StartToStart', fullRange);
 				var offset = cursor.text.length;
-				
-				if (!offset) { // algorithm fails when cursor is on the first position available, so hardcode it here
-					var row = 1; 
-					var col = 1;
-					var char = 1;
-				} else {
-					var lines = String(cursor.text).split('\n');
-					var row = lines.length;
-					
-					// get trailing empty lines, since Internet Explorer automagically trims the selection, we need to do some magic here
-					var oldLength=String(cursor.text).length;
-					var newLength=oldLength;
-					var trailingLines = 0;
-					while((cursor.compareEndPoints('EndToStart', fullRange)>0) && (newLength==oldLength)) {
-						trailingLines += cursor.moveEnd('character',-1);
-						newLength=String(cursor.text).length;
-						// for every character we move the cursor without changing the length of the selection, IE has trimmed of an empty line, so add it here
-					}
-					trailingLines = Math.abs(trailingLines)-1;
-					row += trailingLines;
-					if (row>lines.length) {
-						var char=1;
-						var col=1;
-					} else {
-						var char = lines[lines.length-1].length+1;
-						var col = charPosToColumn(char, lines[lines.length-1]);
-					}
+
+				// now check for trailing empty lines, which IE trims off, for each line, add 2 to the offset.
+				var oldLength=String(cursor.text).length;
+				var newLength=oldLength;
+				var trailingLines = 0;
+				while((cursor.compareEndPoints('EndToStart', fullRange)>0) && (newLength==oldLength)) {
+					trailingLines += cursor.moveEnd('character',-1);
+					newLength=String(cursor.text).length;
+					// for every character we move the cursor without changing the length of the selection, IE has trimmed of an empty line, so add it here
 				}
+				trailingLines = Math.abs(trailingLines);
+				if (trailingLines && offset) {
+					// there's one line too many, only if there is a non-empty line in the textarea; remove it here
+					trailingLines -= 1;
+				}
+				offset += (trailingLines*2);
+				
+				result = getPosition(input, new xTextarea.Position(0,0,0,offset));
+
 			}
-			return new Position(row, col, char, offset); 			
+			return result;
 		}
 		
 		function charPosToColumn(charPos, line) {
@@ -119,6 +127,9 @@
 				if (nextChar == '\t') {
 					realTabSize = tabSize-((colCounter-1)%tabSize);
 					colCounter += realTabSize;
+				} else if ((nextChar == '\r') || (nextChar == '\n')) {
+					// don't count as a column, it's the end of the line, so get out
+					break;
 				} else {
 					colCounter++;
 				}
@@ -143,6 +154,9 @@
 				if (nextChar == '\t') {
 					realTabSize = tabSize-(colCounter%tabSize);
 					colCounter += realTabSize;
+				} else if ((nextChar == '\r') || (nextChar == '\n')) {
+					// don't count as column, it's the end of the line, so everybody get out now
+					break;
 				} else {
 					colCounter++;
 				}
@@ -151,6 +165,9 @@
 		}
 
 		return {
+			getPosition:function(input, position) {
+				return getPosition(input, position);
+			},
 			getCursorPosition:function(input) {
 				return getCursorPosition(input);
 			},
@@ -170,7 +187,7 @@
 		document.getElementById('row').value=pos.row;
 		document.getElementById('col').value=pos.col;
 		document.getElementById('char').value=pos.char;
-		document.getElementById('offset').value=pos.offset;		
+		document.getElementById('offset').value=pos.offset;
 	}
 
 	function test() {
@@ -185,13 +202,16 @@
 	}
 	
 	window.onload=function() {	
-		document.getElementById('test').onkeyup=showInfo;
+		document.getElementById('test').onkeyup=showInfo; // we need the onkeyup to get the key repeat event
+		document.getElementById('test').onkeydown=showInfo;
+// IE doesn't fire keypress on many key presses, like cursor movement etc... so its really not usefull
+//		document.getElementById('test').onkeypress=showInfo;
 		document.getElementById('test').onclick=showInfo;
 	}
 </script>
 </head>
 <body>
-<textarea id='test' style="width: 70%; height: 70%"></textarea>
+<textarea id='test' style="width: 70%; height: 70%" wrap="off"></textarea>
 <div>
 row: <input type="text" style="width: 30px;" id="row">
 col: <input type="text" style="width: 30px;" id="col">
