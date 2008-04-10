@@ -13,10 +13,15 @@
 		
 		var tabSize=8;
 	
-		function setCursorPosition(input, position) {
+		function setCursorPosition(input, position, end) {
 			var fullPosition = getPosition(input, position);
+			if (end) {
+				var endPosition = getPosition(input, end);
+			} else {
+				var endPosition = fullPosition;
+			}
 			if (input.setSelectionRange) {
-				input.setSelectionRange(fullPosition.offset,fullPosition.offset);
+				input.setSelectionRange(fullPosition.offset,endPosition.offset);
 			} else if (document.selection) {
 				// for each newline in the text upto the cursor position, the offset is off by one, since IE counts \r\n as one position with moveStart
 				var offset = fullPosition.offset - (fullPosition.row-1);
@@ -24,6 +29,10 @@
 				cursor.moveToElementText(input);
 				cursor.collapse();
 				cursor.moveStart('character',offset);
+				if (endPosition.largerThan(input, fullPosition)) {
+					var endOffset = endPosition.offset - (endPosition.row-1) - offset;
+					cursor.moveEnd('character', endOffset);
+				}
 				cursor.select();
 			}
 			return offset;
@@ -75,19 +84,24 @@
 			return result;
 		}
 		
-		function getCursorPosition(input) {
+		function getCursorPosition(input, end) {
 			// FIXME: where is the cursor in a selection, head or arse end?
 			// the only way is to keep track of previous values of the cursor position, the one that stays the same is not the cursor
 			var result = false;
 			if (input.setSelectionRange) { 
-
-				result = getPosition(input, new xTextarea.Position(0,0,0,input.selectionStart));
-
+				if (end) {
+					result = getPosition(input, new xTextarea.Position(0,0,0,input.selectionEnd));
+				} else {
+					result = getPosition(input, new xTextarea.Position(0,0,0,input.selectionStart));
+				}
 			} else if (document.selection) { //IE
 
 				var cursor = document.selection.createRange();
 				var fullRange = cursor.duplicate();
 				fullRange.moveToElementText(input);
+				if (!end) {
+					cursor.collapse();
+				}
 				cursor.setEndPoint('StartToStart', fullRange);
 				var offset = cursor.text.length;
 
@@ -164,6 +178,53 @@
 			return charCounter-1;
 		}
 
+		function getSelection(input) {
+			var start = getCursorPosition(input);
+			var end = getCursorPosition(input, true);
+			var value = String(input.value).substr(start.offset, end.offset);
+			return {
+				'start': start,
+				'end': end,
+				'value': value
+			}
+		}
+		
+		function insertContent(input, value, start, end) {
+			var currentSelection = getSelection(input);
+			if (!start) {
+				start = currentSelection.start;
+				if (!end && end!=0) {
+					end = currentSelection.end;
+				}
+			} else {
+				start = getPosition(input, start);
+				if (!end) {
+					end = start;
+				}
+				end = getPosition(input, end);
+				if (end.smallerThan(input, start)) {
+					end = start;
+				}
+			}
+			if (input.setSelectionRange) { 
+				input.value = String(input.value).substr(0, start.offset)+value+String(input.value).substr(end.offset);
+			} else if (document.selection) { //IE
+				setCursorPosition(input, start, end);
+				var r = document.selection.createRange();
+				r.text = value;
+			}
+			if (currentSelection.start.equalTo(input, start)) { // cursor was at the content start, so move the cursor to after the last char of the inserted value and collapse it
+				start = new xTextarea.Position(0,0,0,start.offset+value.length);
+				setCursorPosition(input, start);
+			} else if (currentSelection.start.largerThan(input, end)) { // move the selection to the new position
+				start = new xTextarea.Position(0,0,0,currentSelection.start.offset+value.length);
+				end = new xTextarea.Position(0,0,0,currentSelection.end.offset+value.length);
+				setCursorPosition(input, start, end);
+			} else {
+				setCursorPosition(input, currentSelection.start, currentSelection.end);
+			}
+		}
+		
 		return {
 			getPosition:function(input, position) {
 				return getPosition(input, position);
@@ -171,11 +232,45 @@
 			getCursorPosition:function(input) {
 				return getCursorPosition(input);
 			},
-			setCursorPosition:function(input, position) {
-				return setCursorPosition(input, position);
+			setCursorPosition:function(input, start, end) {
+				return setCursorPosition(input, start, end);
+			},
+			getSelection:function(input) {
+				return getSelection(input);
+			},
+			insertContent:function(input, value, start, end) {
+				return insertContent(input, value, start, end);
 			},
 			Position:function(row, col, char, offset) {
-				this.row=row; this.col=col; this.char=char; this.offset=offset;
+				this.row=row; 
+				this.col=col; 
+				this.char=char; 
+				this.offset=offset;
+				this.compare	= function(input, pos) {
+					if (!this.offset) {
+						var me = getPosition(input, this);
+						this.offset = me.offset;
+					}
+					if (!pos.offset) {
+						pos = getPosition(input, pos);
+					}
+					if (this.offset < pos.offset) {
+						return -1;
+					} else if (this.offset > pos.offset) {
+						return 1;
+					} else {
+						return 0;
+					}
+				}
+				this.largerThan	= function(input, pos) {
+					return this.compare(input, pos)==1;
+				}
+				this.smallerThan = function(input, pos) {
+					return this.compare(input, pos)==-1;
+				}
+				this.equalTo = function(input, pos) {
+					return this.compare(input, pos)==0;
+				}
 			}
 		}
 	}();
@@ -193,7 +288,8 @@
 	function test() {
 		var input = document.getElementById('test');
 		input.focus();
-		xTextarea.setCursorPosition(input, new xTextarea.Position(2, 10));
+		//xTextarea.setCursorPosition(input, new xTextarea.Position(2, 10), new xTextarea.Position(3,10));
+		xTextarea.insertContent(input, 'Dit is een test', new xTextarea.Position(4,10));
 		var pos = xTextarea.getCursorPosition(input);
 		document.getElementById('row').value=pos.row;
 		document.getElementById('col').value=pos.col;
@@ -218,6 +314,6 @@ col: <input type="text" style="width: 30px;" id="col">
 char: <input type="text" style="width: 30px;" id="char">
 off: <input type="text" style="width: 30px;" id="offset">
 
-<button onClick="test();">test</button>
+<button onClick="test();" unselectable="on">test</button>
 </body>
 </html>
