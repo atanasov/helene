@@ -1,0 +1,1 @@
+Helene is a syntax highlighting text editor written in javascript. It is meant as a replacement for textarea's in webbased IDE's.
